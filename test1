@@ -1,0 +1,194 @@
+# -*- coding: utf-8 -*-
+"""
+Created on Tue Feb 25 11:02:10 2020
+
+@author: boiti
+"""
+
+from scipy.optimize import linprog
+from scipy.optimize import curve_fit
+import numpy as np
+import time
+import matplotlib.pyplot as plt
+
+def KleeMinty(n):
+    """ Crée le problème Klee Minty avec n variables"""
+    
+    c = np.array([-pow(10,n-1)])
+    b = np.array([1])
+    A = np.c_[1, np.zeros((1,n-1))]
+
+    for i in range (2,n+1):
+        A_line = np.zeros([1,n])
+        for j in range (1,n+1):
+            
+            if j < i:
+                A_line[0, j-1] = 2*pow(10,i-j)
+            elif j == i:    
+                A_line[0, j-1] = 1
+            else:
+                A_line[0, j-1] = 0
+        
+        A = np.r_[A, A_line]
+        c = np.append(c,-pow(10,n-i))
+        b = np.append(b,pow(100,i-1))
+        
+    # Ajout des variables de non base
+    A = np.c_[A,np.eye(n)]
+    c = np.r_[c, np.zeros((n))]
+    
+    return A,b,c
+
+def CdV(A,c):
+    """ Fonction changement de variable :
+    transforme les matrices A et c
+    u_i = 100^(1-i)x_i"""
+    
+    for i in range(np.size(c)):
+        c[i] = c[i]*pow(100, 1-i)
+        A[:,1] = A[:,1]*pow(100, 1-i)
+    return A,c
+    
+def Polynom(x, a, b):
+    return a*pow(x,b)
+
+def Expo(x, a, b):
+    return a*np.exp(x*b)
+
+def resolution(sample, changement_de_variable, itermax):
+    # Ordonnées
+    Time = np.zeros(sample-1)
+    # Abcisses
+    N = np.zeros(sample-1)
+    
+    for i in range (2, sample+1):
+        
+        A, b, c = KleeMinty(i)
+        
+        if changement_de_variable == 1:
+            A, c = CdV(A, c)
+        
+        start = time.perf_counter_ns()
+        linprog(c, A_ub=A, b_ub=b, method='revised simplex', options={"maxiter" : itermax})
+        stop = time.perf_counter_ns()
+        
+        effective_time = stop - start
+        Time[i-2] = effective_time*pow(10,-9)
+        N[i-2] = i
+        
+    return N, Time
+
+
+"""----------------------------------------------------------------------------
+                N jusqu'à 20, sans changement de variable
+----------------------------------------------------------------------------"""
+Samples1 = 24
+Changement1 = 0
+iterationmax = 100000000000000
+
+#Fixed because limited number of call for a specific function curve_fit uses
+nb_ele_curvefit = 20
+
+N1, Time1 = resolution(Samples1, Changement1, iterationmax)
+
+"""----------------------- Plot de temps d'execution -----------------------"""
+plt.figure(1)
+plt.plot(N1, Time1, label='Execution time')
+plt.ylabel('Time in second')
+plt.xlabel('n')
+plt.grid()
+plt.legend()
+plt.savefig("Executive_time_n20")
+
+#Approximation polynomiale
+popt1, pcov1 = curve_fit(Polynom, N1[0:nb_ele_curvefit], Time1[0:nb_ele_curvefit])
+Y_approx1 = Polynom(N1, *popt1)
+print('Coefficient polynomiaux :', *popt1)
+print('Covariance = ', np.sqrt(np.diag(pcov1)))
+
+#Approximation exponentielle
+popt2, pcov2 = curve_fit(Expo, N1[0:20], Time1[0:20])
+Y_approx2 = Expo(N1, *popt2)
+print('Coefficient exponentiels :', *popt2)
+print('Covariance = ', np.sqrt(np.diag(pcov2)))
+
+"""---------------- Plot des approximations par curvefit() -----------------"""
+plt.figure(2)
+plt.plot(N1, Time1, label='Execution time')
+plt.plot(N1, Y_approx1, label='Polynomial approx')
+plt.plot(N1, Y_approx2, label='Exponential approx')
+plt.ylabel('Time (s)')
+plt.xlabel('n')
+plt.legend()
+plt.grid()
+plt.savefig("Curvefit_approx")
+
+"""----------- Plot graphique logarithmique et semi_logarithmique ----------"""
+plt.figure(3)
+plt.subplot(1,2,1)
+plt.plot(np.log(N1), np.log(Time1))
+plt.xlabel('log(n)')
+plt.ylabel('log(t)',)
+plt.grid()
+
+ax=plt.subplot(1,2,2)
+plt.plot(N1, np.log(Time1))
+plt.xlabel('n')
+plt.ylabel('log(t)')
+ax.yaxis.set_label_position("right")
+ax.yaxis.tick_right()
+plt.grid()
+plt.savefig("Log_approx")
+
+
+"""----------------------------------------------------------------------------
+            N jusqu'à 30, sans changement de variable, itermax=1
+----------------------------------------------------------------------------"""
+Samples_perso = 30
+Changement_perso = 0
+iteration_unique = 1
+
+N_perso, time_perso = resolution(Samples_perso, Changement_perso, iteration_unique)
+# Number of feasible point for specific n (based on articles)
+Feasible_point = np.array([pow(2,i) for i in range(1,Samples_perso)])
+
+"""----------------- Plot idée d'approximation (articles) ------------------"""
+plt.figure(4)
+plt.plot(N_perso, time_perso, label='one iteration')
+plt.plot(N_perso, time_perso[0]*Feasible_point, label='Approx 1')
+plt.plot(N_perso, time_perso[0:Samples_perso]*Feasible_point, label='Approx 2')
+plt.plot(N1,Time1, label='Execution time')
+plt.xlabel('n')
+plt.ylabel('time (s)')
+plt.legend()
+plt.grid()
+plt.title('Evidence of exponential number of feasible point')
+plt.savefig("article_approx")
+
+N2 = np.linspace(1, 30, 30)
+plt.figure(5)
+plt.plot(N2, Polynom(N2, *popt1), label='Polynomial approx')
+plt.plot(N2, Expo(N2, *popt2), label='Exponential approx')
+plt.ylabel('Time (s)')
+plt.xlabel('N')
+plt.legend()
+plt.title('Return to curvefit approxs')
+plt.savefig('Curvefit_approx2')
+
+
+"""----------------------------------------------------------------------------
+            N jusqu'à 2*N_precedent, avec changement de variable
+----------------------------------------------------------------------------"""
+Samples2 = 2*Samples1
+Changement2 = 1
+
+N2, Time2 = resolution(Samples2, Changement2, iterationmax)
+
+"""----------- Plot temps d'execution avec changement de variable ----------"""
+plt.figure(6)
+plt.plot(N2,Time2, label='Executive time')
+plt.ylabel('Time (s)')
+plt.xlabel('N')
+plt.legend()
+plt.title("Changing variable")
+plt.savefig("Changementdevariable")
